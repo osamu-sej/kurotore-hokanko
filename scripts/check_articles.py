@@ -26,6 +26,7 @@ def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
     seen_urls: dict[str, str] = {}
+    seen_orders: dict[tuple[str, str], str] = {}
     count = 0
 
     for path in sorted(ARTICLES_DIR.rglob("*.md")):
@@ -57,6 +58,15 @@ def main() -> int:
 
         if "order" not in meta:
             warnings.append(f"{rel}: order がありません（同じ日の中の表示順が不定になります）")
+        elif date:
+            key = (date, str(meta["order"]))
+            if key in seen_orders:
+                errors.append(
+                    f"{rel}: order={meta['order']} が {seen_orders[key]} と重複しています。"
+                    "同じ日付の中では order を一意にしてください（既存の最大 order + 1 を付ける）"
+                )
+            else:
+                seen_orders[key] = str(rel)
 
         if len(body) > MAX_BODY_CHARS:
             errors.append(
