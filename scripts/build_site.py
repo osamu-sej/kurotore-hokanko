@@ -182,6 +182,7 @@ def load_articles() -> list[dict]:
                 "series": str(meta.get("series", "")),
                 "category": str(meta.get("category", "")),
                 "date": str(meta.get("date", path.parent.name)),
+                "order": int(meta["order"]) if str(meta.get("order", "")).lstrip("-").isdigit() else 0,
                 "tags": [str(t) for t in tags],
                 "partial": bool(meta.get("paywalled_other_brand")),
                 "paywall_note": str(meta.get("paywall_note", "")),
@@ -191,161 +192,70 @@ def load_articles() -> list[dict]:
                 "body": body,
             }
         )
-    articles.sort(key=lambda a: (a["date"], a["title"]), reverse=True)
+    # 日付は新しい順、同じ日の中は掲載順（order 昇順）
+    articles.sort(key=lambda a: (a["date"], -a["order"]), reverse=True)
     return articles
 
 
 # --------------------------------------------------------------------------
 # HTML 生成
 #
-# 記事数が数千件規模まで増えるため、一覧は 1 枚に全部並べない。
-#   index.html   直近 RECENT 件 + 月別ナビ + 検索（index.json を必要時に取得）
-#   m/YYYY-MM.html  その月の全記事
+# アーティファクト版保管庫 (kurotore-archive-updated) と同一の UI を再現する。
+# スタイルは scripts/style.css をそのまま配置し、マークアップも同じ構造で出す。
+# アーティファクトは全記事を JS で描画していたが、こちらはサーバー側で書き出して
+# JS は絞り込みだけを担当する（JS 無しでも読める）。
 # --------------------------------------------------------------------------
 
-RECENT = 80
-
-CSS = """
-:root{--bg:#f0efe8;--surface:#fbfaf6;--fg:#211f1a;--muted:#7c7568;--faint:#a49c8c;
---line:#e2ddd0;--accent:#c1502e;--accent-strong:#a63e20;--accent-tint:#f3ddd2;
---tag-bg:#efe9dd;--tag-text:#6d6455;--warn-bg:#fdf3e3;--warn-line:#e3c48d;--warn-fg:#7a5310;}
-@media (prefers-color-scheme:dark){:root{--bg:#17160f;--surface:#201e17;--fg:#f0ece0;
---muted:#a89e88;--faint:#766d5c;--line:#37331f;--accent:#e08654;--accent-strong:#f0996a;
---accent-tint:#3d2a1c;--tag-bg:#2a271b;--tag-text:#b8ad94;--warn-bg:#2e2519;
---warn-line:#6b5427;--warn-fg:#e8c88a;}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);line-height:1.7;
-font-family:'Noto Sans JP','Hiragino Kaku Gothic ProN','Hiragino Sans',Meiryo,system-ui,sans-serif;
--webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
-.wrap{max-width:1000px;margin:0 auto;padding:0 22px 80px}
-a{color:var(--accent)}
-header.site{border-bottom:1px solid var(--line);margin-bottom:24px;padding:40px 0 22px}
-header.site h1{margin:0 0 8px;font-size:clamp(24px,3.4vw,32px);font-weight:700;letter-spacing:.01em}
-header.site .lede{margin:0;color:var(--muted);font-size:14px}
-.tools{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px}
-#q{flex:1 1 260px;min-width:0;padding:11px 14px;border:1px solid var(--line);border-radius:9px;
-background:var(--surface);color:var(--fg);font-size:15px;font-family:inherit}
-#q:focus{outline:2px solid var(--accent);outline-offset:1px}
-.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px}
-.tag{border:1px solid var(--line);background:var(--surface);color:var(--tag-text);
-border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:inherit;line-height:1.6}
-.tag:hover{border-color:var(--accent);color:var(--fg)}
-.tag[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-@media (prefers-color-scheme:dark){.tag[aria-pressed="true"]{color:#1a1714}}
-.nav{background:var(--surface);border:1px solid var(--line);border-radius:11px;
-padding:16px 18px;margin-bottom:26px}
-.nav h2{margin:0 0 10px;font-size:12px;letter-spacing:.1em;color:var(--muted);font-weight:600}
-.nav .yr{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;margin-bottom:8px}
-.nav .yr b{font-size:13px;color:var(--faint);margin-right:4px;font-weight:600}
-.nav a{display:inline-block;font-size:13px;text-decoration:none;border:1px solid var(--line);
-border-radius:7px;padding:3px 9px;background:var(--bg)}
-.nav a:hover{border-color:var(--accent)}
-.nav a span{color:var(--faint);font-size:11px;margin-left:3px}
-h2.day{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.09em;
-margin:30px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:11px;
-padding:15px 18px;margin-bottom:10px}
-.card h3{margin:0 0 7px;font-size:16px;line-height:1.55;font-weight:600}
-.card h3 a{color:var(--fg);text-decoration:none}
-.card h3 a:hover{color:var(--accent);text-decoration:underline}
-.series{display:inline-block;font-size:12px;color:var(--accent-strong);background:var(--accent-tint);
-border-radius:5px;padding:2px 8px;margin-bottom:7px}
-.summary{font-size:13.5px;color:var(--muted);margin:0 0 10px;
-display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11.5px;color:var(--muted)}
-.meta .chip{border:1px solid var(--line);background:var(--tag-bg);color:var(--tag-text);
-border-radius:999px;padding:1px 9px}
-.meta .cat{background:var(--accent-tint);color:var(--accent-strong);border-color:transparent}
-.meta a{color:var(--accent);text-decoration:none}
-.meta a:hover{text-decoration:underline}
-.partial{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-fg)}
-.note{color:var(--faint);font-size:12.5px;margin:0 0 18px}
-.status{color:var(--muted);font-size:13px;margin:0 0 14px}
-article.detail{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:28px 30px}
-article.detail h1{font-size:21px;line-height:1.55;margin:0 0 14px}
-article.detail p{font-size:15px}
-article.detail blockquote{margin:16px 0;padding:2px 16px;border-left:3px solid var(--warn-line);
-background:var(--warn-bg);border-radius:0 7px 7px 0}
-article.detail blockquote p{color:var(--warn-fg)}
-.back{display:inline-block;margin:26px 0 20px;color:var(--accent);text-decoration:none;font-size:14px}
-.back:hover{text-decoration:underline}
-.source{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:13.5px;color:var(--muted)}
-footer.site{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);
-color:var(--faint);font-size:12px}
-@media(max-width:600px){article.detail{padding:20px 18px}.wrap{padding:0 14px 60px}}
-"""
+STYLE_SRC = Path(__file__).resolve().parent / "style.css"
 
 JS = """
 (function(){
-  var q=document.getElementById('q'), out=document.getElementById('results'),
-      def=document.getElementById('default'), status=document.getElementById('status'),
-      idx=null, pending=false, active=new Set();
+  var state = { tag: null, q: "" };
+  var cards = [].map.call(document.querySelectorAll('article.card'), function(el){
+    var sum = el.querySelector('.summary');
+    return {
+      el: el,
+      text: (el.querySelector('h2').textContent + ' ' + (sum ? sum.textContent : '')).toLowerCase(),
+      tags: [].map.call(el.querySelectorAll('.tag-pill'), function(t){
+        return t.textContent.replace(/^#/, '');
+      })
+    };
+  });
+  var headings = [].slice.call(document.querySelectorAll('.date-heading'));
+  var buttons  = [].slice.call(document.querySelectorAll('.tag-btn'));
+  var empty    = document.getElementById('empty');
+  var search   = document.getElementById('search');
 
-  function esc(s){return String(s).replace(/[&<>"]/g,function(c){
-    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-
-  function render(list){
-    if(!list.length){ status.textContent='該当する記事がありません。'; out.innerHTML=''; return; }
-    status.textContent=list.length+' 件';
-    var day=null, h=[];
-    list.forEach(function(a){
-      if(a.date!==day){ day=a.date; h.push('<h2 class="day">'+esc(day)+'</h2>'); }
-      h.push('<div class="card">');
-      if(a.series) h.push('<div class="series">'+esc(a.series)+'</div>');
-      h.push('<h3><a href="a/'+esc(a.slug)+'.html">'+esc(a.title)+'</a></h3>');
-      h.push('<div class="meta">');
-      if(a.category) h.push('<span class="chip cat">'+esc(a.category)+'</span>');
-      if(a.partial) h.push('<span class="chip partial">一部のみ取得</span>');
-      (a.tags||[]).slice(0,6).forEach(function(t){h.push('<span class="chip">'+esc(t)+'</span>');});
-      if(a.url) h.push('<a href="'+esc(a.url)+'" target="_blank" rel="noopener noreferrer">元記事 ↗</a>');
-      h.push('</div></div>');
+  function render(){
+    var q = state.q.trim().toLowerCase(), shown = 0;
+    cards.forEach(function(c){
+      var ok = (!state.tag || c.tags.indexOf(state.tag) > -1) && (!q || c.text.indexOf(q) > -1);
+      c.el.hidden = !ok;
+      if (ok) shown++;
     });
-    out.innerHTML=h.join('');
+    headings.forEach(function(h){
+      var n = h.nextElementSibling, any = false;
+      while (n && n.classList.contains('card')) { if (!n.hidden) any = true; n = n.nextElementSibling; }
+      h.hidden = !any;
+    });
+    buttons.forEach(function(b){
+      b.classList.toggle('active', (b.dataset.tag || null) === state.tag);
+    });
+    empty.hidden = shown > 0;
   }
 
-  function filter(){
-    var term=(q.value||'').trim().toLowerCase();
-    if(!term && active.size===0){
-      def.hidden=false; out.innerHTML=''; status.textContent=''; return;
-    }
-    def.hidden=true;
-    if(!idx){ status.textContent='読み込み中…'; return; }
-    render(idx.filter(function(a){
-      if(active.size){
-        var tags=a.tags||[], ok=true;
-        active.forEach(function(t){ if(tags.indexOf(t)<0) ok=false; });
-        if(!ok) return false;
-      }
-      if(!term) return true;
-      return (a.title+' '+(a.series||'')+' '+(a.category||'')+' '+(a.tags||[]).join(' ')
-             ).toLowerCase().indexOf(term)>-1;
-    }));
-  }
-
-  function ensure(){
-    if(idx||pending) return;
-    pending=true;
-    fetch('index.json').then(function(r){return r.json();}).then(function(j){
-      idx=j.articles; pending=false; filter();
-    }).catch(function(){ pending=false; status.textContent='索引を読み込めませんでした。'; });
-  }
-
-  q.addEventListener('input',function(){ ensure(); filter(); });
-  q.addEventListener('focus',ensure);
-  [].forEach.call(document.querySelectorAll('.tag'),function(b){
-    b.addEventListener('click',function(){
-      var t=b.dataset.tag;
-      if(active.has(t)){active.delete(t);b.setAttribute('aria-pressed','false');}
-      else{active.add(t);b.setAttribute('aria-pressed','true');}
-      ensure(); filter();
+  buttons.forEach(function(b){
+    b.addEventListener('click', function(){
+      state.tag = b.dataset.tag || null;
+      render();
     });
   });
+  search.addEventListener('input', function(e){ state.q = e.target.value; render(); });
 })();
 """
 
 
-def page(title: str, body_html: str, depth: int = 0, desc: str = SITE_DESC) -> str:
-    base = "../" * depth
+def page(title: str, body_html: str, desc: str = SITE_DESC) -> str:
     return f"""<!doctype html>
 <html lang="ja">
 <head>
@@ -354,186 +264,135 @@ def page(title: str, body_html: str, depth: int = 0, desc: str = SITE_DESC) -> s
 <title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(desc)}">
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="{base}style.css">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="wrap">
 {body_html}
-<footer class="site">
-{html.escape(SITE_TITLE)} — 各記事は日経クロストレンドの著作物です。本サイトはタイトル・出典リンク・自作の要約のみを保管しており、本文は転載していません。
-</footer>
 </div>
+<script>{JS}</script>
 </body>
 </html>
 """
 
 
-def summary_text(body: str, limit: int = 140) -> str:
-    plain = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
-    plain = re.sub(r"[>*`\[\]]", "", plain)
-    plain = re.sub(r"\s+", " ", plain).strip()
-    return plain[:limit]
+def fmt_date(iso: str) -> str:
+    y, m, d = iso.split("-")
+    return f"{y}年{int(m)}月{int(d)}日"
 
 
-def card_html(a: dict, depth: int = 0) -> str:
-    base = "../" * depth
-    parts = ['<div class="card">']
+def card_summary(body: str) -> str:
+    """記事本文から、カードに出す要約テキストを取り出す。"""
+    text = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
+    lines = [re.sub(r"^>\s?", "", ln).strip() for ln in text.split("\n")]
+    text = " ".join(ln for ln in lines if ln)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"（全文は元記事を参照[^）]*）", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def card_html(a: dict) -> str:
+    parts = ['<article class="card">']
+
+    crumb = f'<span class="cat">{html.escape(a["category"])}</span>' if a["category"] else ""
     if a["series"]:
-        parts.append(f'<div class="series">{html.escape(a["series"])}</div>')
-    parts.append(f'<h3><a href="{base}a/{a["slug"]}.html">{html.escape(a["title"])}</a></h3>')
-    parts.append(f'<p class="summary">{html.escape(summary_text(a["body"]))}</p>')
-    parts.append('<div class="meta">')
-    if a["category"]:
-        parts.append(f'<span class="chip cat">{html.escape(a["category"])}</span>')
-    if a["partial"]:
-        parts.append('<span class="chip partial">一部のみ取得</span>')
-    for t in a["tags"][:6]:
-        parts.append(f'<span class="chip">{html.escape(t)}</span>')
+        crumb = (crumb + " / " if crumb else "") + html.escape(a["series"])
+    if crumb:
+        parts.append(f'<div class="breadcrumb">{crumb}</div>')
+
+    parts.append(f'<h2>{html.escape(a["title"])}</h2>')
+
+    summary = card_summary(a["body"])
+    if summary:
+        parts.append(f'<p class="summary">{html.escape(summary)}</p>')
+
+    if a["tags"]:
+        pills = "".join(f'<span class="tag-pill">#{html.escape(t)}</span>' for t in a["tags"])
+        parts.append(f'<div class="tags">{pills}</div>')
+
     if a["url"]:
-        parts.append(f'<a href="{html.escape(a["url"])}" target="_blank" rel="noopener noreferrer">元記事 ↗</a>')
-    parts.append("</div></div>")
-    return "\n".join(parts)
-
-
-def cards_by_day(articles: list[dict], depth: int = 0) -> list[str]:
-    out, day = [], None
-    for a in articles:
-        if a["date"] != day:
-            day = a["date"]
-            out.append(f'<h2 class="day">{html.escape(day)}</h2>')
-        out.append(card_html(a, depth))
-    return out
-
-
-def month_nav(articles: list[dict]) -> str:
-    months: dict[str, int] = {}
-    for a in articles:
-        months[a["date"][:7]] = months.get(a["date"][:7], 0) + 1
-
-    years: dict[str, list[str]] = {}
-    for ym in sorted(months, reverse=True):
-        years.setdefault(ym[:4], []).append(ym)
-
-    parts = ['<nav class="nav"><h2>月別アーカイブ</h2>']
-    for year in sorted(years, reverse=True):
-        parts.append(f'<div class="yr"><b>{year}</b>')
-        for ym in years[year]:
-            parts.append(
-                f'<a href="m/{ym}.html">{ym[5:7]}月<span>{months[ym]}</span></a>'
-            )
-        parts.append("</div>")
-    parts.append("</nav>")
+        parts.append(
+            f'<a class="source-link" href="{html.escape(a["url"])}" '
+            'target="_blank" rel="noopener">元記事を読む ↗</a>'
+        )
+    parts.append("</article>")
     return "\n".join(parts)
 
 
 def build_index(articles: list[dict]) -> str:
-    all_tags: dict[str, int] = {}
+    tag_counts: dict[str, int] = {}
     for a in articles:
         for t in a["tags"]:
-            all_tags[t] = all_tags.get(t, 0) + 1
-    top_tags = sorted(all_tags.items(), key=lambda kv: (-kv[1], kv[0]))[:24]
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+    sorted_tags = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    days = sorted({a["date"] for a in articles}, reverse=True)
+    latest = fmt_date(days[0]) if days else "—"
 
-    parts = [
-        '<header class="site">',
+    p = [
+        '<header class="top">',
+        "<div>",
+        '<span class="eyebrow">XTREND ARCHIVE</span>',
         f"<h1>{html.escape(SITE_TITLE)}</h1>",
-        f'<p class="lede">日経クロストレンド 読了アーカイブ — 全 {len(articles)} 本 / '
-        f'最終更新 {datetime.now(JST).strftime("%Y-%m-%d %H:%M")} JST</p>',
+        '<p class="lede">日経クロストレンドの新着記事を読み、要約し、タグ別に蓄積していくアーカイブです。</p>',
+        "</div>",
+        '<div class="stats">',
+        f'<div class="stat"><b>{len(articles)}</b><span>記事</span></div>',
+        f'<div class="stat"><b>{len(tag_counts)}</b><span>タグ</span></div>',
+        f'<div class="stat"><b>{len(days)}</b><span>日分</span></div>',
+        "</div>",
         "</header>",
-        '<div class="tools"><input id="q" type="search" '
-        'placeholder="全 %d 本から検索（タイトル・シリーズ・カテゴリ・タグ）" autocomplete="off"></div>'
-        % len(articles),
+        '<div class="meta-row">',
+        f'<span class="pill"><span class="dot"></span>最終更新： {latest}</span>',
+        '<span class="pill">⏰ 毎朝7:00にチェックのリマインダーが届きます</span>',
+        "</div>",
+        '<hr class="rule" />',
+        '<div class="layout">',
+        "<aside>",
+        '<div><div class="side-label">検索</div>',
+        '<input id="search" type="text" placeholder="タイトル・要約を検索..." autocomplete="off" /></div>',
+        '<div><div class="side-label">タグで絞り込み</div>',
+        '<div class="tag-list" id="tagList">',
+        f'<button class="tag-btn active" type="button"><span>すべて</span><span class="n">{len(articles)}</span></button>',
     ]
-
-    if top_tags:
-        parts.append('<div class="tags">')
-        for tag, count in top_tags:
-            parts.append(
-                f'<button class="tag" type="button" aria-pressed="false" '
-                f'data-tag="{html.escape(tag)}">{html.escape(tag)} <span>{count}</span></button>'
-            )
-        parts.append("</div>")
-
-    parts.append('<p class="status" id="status"></p>')
-    parts.append('<div id="results"></div>')
-
-    parts.append('<div id="default">')
-    parts.append(month_nav(articles))
-    parts.append(f'<p class="note">直近 {min(RECENT, len(articles))} 本を表示しています。'
-                 "それ以前は上の月別アーカイブ、または検索欄から。</p>")
-    parts.extend(cards_by_day(articles[:RECENT]))
-    parts.append("</div>")
-
-    parts.append(f"<script>{JS}</script>")
-    return "\n".join(parts)
-
-
-def build_month(ym: str, articles: list[dict]) -> str:
-    parts = [
-        '<a class="back" href="../index.html">← 保管庫トップに戻る</a>',
-        '<header class="site">',
-        f"<h1>{ym[:4]}年{ym[5:7]}月</h1>",
-        f'<p class="lede">{len(articles)} 本</p>',
-        "</header>",
-    ]
-    parts.extend(cards_by_day(articles, depth=1))
-    return "\n".join(parts)
-
-
-def build_detail(a: dict) -> str:
-    parts = [
-        '<a class="back" href="../index.html">← 保管庫トップに戻る</a>',
-        '<article class="detail">',
-    ]
-    if a["series"]:
-        parts.append(f'<div class="series">{html.escape(a["series"])}</div>')
-    parts.append(f'<h1>{html.escape(a["title"])}</h1>')
-    parts.append('<div class="meta">')
-    parts.append(f'<span class="chip">{html.escape(a["date"])}</span>')
-    if a["category"]:
-        parts.append(f'<span class="chip cat">{html.escape(a["category"])}</span>')
-    if a["partial"]:
-        parts.append('<span class="chip partial">一部のみ取得</span>')
-    for t in a["tags"]:
-        parts.append(f'<span class="chip">{html.escape(t)}</span>')
-    parts.append("</div>")
-    parts.append(render_markdown(a["body"]))
-    if a["url"]:
-        parts.append(
-            '<div class="source">出典: '
-            f'<a href="{html.escape(a["url"])}" target="_blank" rel="noopener noreferrer">{html.escape(a["url"])}</a>'
-            "<br>本文は転載していません。全文は元記事（日経クロストレンド）をご覧ください。</div>"
+    for tag, count in sorted_tags:
+        p.append(
+            f'<button class="tag-btn" type="button" data-tag="{html.escape(tag)}">'
+            f'<span>{html.escape(tag)}</span><span class="n">{count}</span></button>'
         )
-    parts.append("</article>")
-    return "\n".join(parts)
+    p.append("</div></div></aside>")
+
+    p.append('<main id="main">')
+    day = None
+    for a in articles:
+        if a["date"] != day:
+            day = a["date"]
+            p.append(f'<div class="date-heading">{html.escape(fmt_date(day))}</div>')
+        p.append(card_html(a))
+    p.append('<div class="empty" id="empty" hidden>該当する記事がありません。</div>')
+    p.append("</main></div>")
+
+    p.append(
+        '<footer class="note">'
+        "<p>タグは日経クロストレンドの記事に実際に付いているものをそのまま使用しています。"
+        "毎朝の取り込みで新着記事がリポジトリに追加されると、このページは自動で再生成されます。</p>"
+        "<p>Source: xtrend.nikkei.com（有料会員限定記事を含む）／本文は転載せず、要約のみを保管しています。"
+        f"<br />最終取得日: {html.escape(latest)}</p>"
+        "</footer>"
+    )
+    return "\n".join(p)
 
 
 def main() -> None:
     articles = load_articles()
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
-    (OUT_DIR / "a").mkdir(parents=True)
-    (OUT_DIR / "m").mkdir(parents=True)
+    OUT_DIR.mkdir(parents=True)
 
-    (OUT_DIR / "style.css").write_text(CSS, encoding="utf-8")
+    shutil.copyfile(STYLE_SRC, OUT_DIR / "style.css")
     (OUT_DIR / ".nojekyll").write_text("", encoding="utf-8")
     (OUT_DIR / "index.html").write_text(page(SITE_TITLE, build_index(articles)), encoding="utf-8")
 
-    by_month: dict[str, list[dict]] = {}
-    for a in articles:
-        by_month.setdefault(a["date"][:7], []).append(a)
-    for ym, items in by_month.items():
-        (OUT_DIR / "m" / f"{ym}.html").write_text(
-            page(f"{ym[:4]}年{ym[5:7]}月 | {SITE_TITLE}", build_month(ym, items), depth=1),
-            encoding="utf-8",
-        )
-
-    for a in articles:
-        (OUT_DIR / "a" / f"{a['slug']}.html").write_text(
-            page(f"{a['title']} | {SITE_TITLE}", build_detail(a), depth=1, desc=summary_text(a["body"])),
-            encoding="utf-8",
-        )
-
-    # 翌朝の取り込みで「すでに保管済みか」を判定し、サイト内検索の索引も兼ねる
+    # 翌朝の取り込みで「すでに保管済みか」を判定するためのインデックス
     (OUT_DIR / "index.json").write_text(
         json.dumps(
             {
@@ -541,7 +400,7 @@ def main() -> None:
                 "count": len(articles),
                 "urls": sorted({a["url"] for a in articles if a["url"]}),
                 "articles": [
-                    {k: a[k] for k in ("title", "url", "series", "category", "date", "tags", "partial", "slug")}
+                    {k: a[k] for k in ("title", "url", "series", "category", "date", "tags", "partial")}
                     for a in articles
                 ],
             },
@@ -551,7 +410,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(f"built {len(articles)} articles / {len(by_month)} months -> {OUT_DIR.relative_to(ROOT)}/")
+    print(f"built {len(articles)} articles -> {OUT_DIR.relative_to(ROOT)}/")
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@
      `/atcl/contents/` 以外（`/atcl/seminar/…` など）は `/atcl/` の後ろを使う → `seminar-19-00075-00025.md`
    - 連番を数えたり英語スラッグを考えたりしない。同じ記事なら常に同じファイル名になるので、
      取り込みを二度走らせても増殖しない。
+   - `order` はその日の新着一覧での並び順を 0 始まりで入れる。サイト上の表示順に使う。
 5. `python3 scripts/check_articles.py` を通す。
 6. 1 記事 1 コミットで `main` に push する。push されると Pages が自動更新される。
 
@@ -45,6 +46,7 @@ url: "https://xtrend.nikkei.com/atcl/contents/18/01432/00006/"
 series: "シリーズ名（第6回／全6回）"      # 無ければ空文字か省略
 category: "マーケ・消費"                   # 記事ページ上部のカテゴリ
 date: 2026-08-28
+order: 0                                   # その日の中での掲載順（0 始まり）
 fetched_via: "claude-in-chrome"
 tags: ["マーケ", "運輸", "ブランド価値向上"]   # 記事ページのタグに合わせる。空にしない
 ---
