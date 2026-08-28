@@ -29,8 +29,6 @@ def main() -> int:
     count = 0
 
     for path in sorted(ARTICLES_DIR.rglob("*.md")):
-        if path.name.startswith("_"):
-            continue
         rel = path.relative_to(ROOT)
         meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
         count += 1
@@ -56,6 +54,9 @@ def main() -> int:
 
         if not meta.get("tags"):
             warnings.append(f"{rel}: tags が空です")
+
+        if "order" not in meta:
+            warnings.append(f"{rel}: order がありません（同じ日の中の表示順が不定になります）")
 
         if len(body) > MAX_BODY_CHARS:
             errors.append(

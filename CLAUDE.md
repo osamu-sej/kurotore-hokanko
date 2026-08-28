@@ -73,6 +73,9 @@ paywall_note: "日経トレンディ電子版有料会員限定のため導入�
 | `articles/YYYY-MM-DD/*.md` | 記事の実体（唯一の情報源） |
 | `scripts/build_site.py` | `site/` に静的サイトを生成（トップ＝直近80本＋月別ナビ＋検索、`m/YYYY-MM.html`＝月別、`a/<記事ID>.html`＝記事ごと） |
 | `scripts/check_articles.py` | 必須項目・URL 重複・本文長を検査 |
+
+`articles/` 配下の `.md` は例外なく検査対象になる。除外される名前は無いので、
+記事以外のメモを置きたい場合は `articles/` の外に置くこと。
 | `.github/workflows/deploy.yml` | `main` への push でビルドして Pages へデプロイ |
 
 ローカル確認:

@@ -166,8 +166,6 @@ def slug_for(url: str, fallback: str) -> str:
 def load_articles() -> list[dict]:
     articles: list[dict] = []
     for path in sorted(ARTICLES_DIR.rglob("*.md")):
-        if path.name.startswith("_"):
-            continue
         meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
         if not meta.get("title"):
             continue
