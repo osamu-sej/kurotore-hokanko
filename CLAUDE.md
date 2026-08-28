@@ -20,12 +20,17 @@
 1. `git pull origin main` で最新化する。
 2. 取得済み URL の一覧を出す:
    `grep -rh '^url:' articles/ | sed 's/url: *"//; s/"$//' | sort`
-   （公開サイトの `index.json` の `urls` でも同じものが取れる）
+   （公開サイトの `index.json` の `urls` でも同じものが取れるが、Pages への反映に
+   1〜2 分のラグがあるため、同じ朝に続けて走らせる場合はリポジトリ側を見ること）
 3. Claude in Chrome で日経クロストレンドの新着一覧を開き、**2 に無い URL だけ**を対象にする。
-4. 対象記事を開いて読み、下の書式で `articles/YYYY-MM-DD/NN-slug.md` を作る。
-   - `YYYY-MM-DD` は取り込んだ日。
-   - `NN` はそのディレクトリ内の既存の最大番号 + 1（同じ日に 2 回走らせても衝突しない）。
-   - `slug` は内容が分かる短い英小文字ハイフン区切り。
+4. 対象記事を開いて読み、下の書式で `articles/YYYY-MM-DD/<記事ID>.md` を作る。
+   - `YYYY-MM-DD` は記事の公開日（＝取り込んだ日）。
+   - `<記事ID>` は **URL から機械的に導く**。`/atcl/contents/` の後ろをハイフンで繋ぐ。
+     `.../atcl/contents/18/01432/00006/` → `18-01432-00006.md`
+     `.../atcl/contents/casestudy/00001/00023/` → `casestudy-00001-00023.md`
+     `/atcl/contents/` 以外（`/atcl/seminar/…` など）は `/atcl/` の後ろを使う → `seminar-19-00075-00025.md`
+   - 連番を数えたり英語スラッグを考えたりしない。同じ記事なら常に同じファイル名になるので、
+     取り込みを二度走らせても増殖しない。
 5. `python3 scripts/check_articles.py` を通す。
 6. 1 記事 1 コミットで `main` に push する。push されると Pages が自動更新される。
 
@@ -38,9 +43,10 @@
 title: "記事タイトル（全角スペースもそのまま）"
 url: "https://xtrend.nikkei.com/atcl/contents/18/01432/00006/"
 series: "シリーズ名（第6回／全6回）"      # 無ければ空文字か省略
+category: "マーケ・消費"                   # 記事ページ上部のカテゴリ
 date: 2026-08-28
-fetched_via: claude-in-chrome
-tags: [マーケ, 運輸, ブランド価値向上]     # 記事ページのタグに合わせる。空にしない
+fetched_via: "claude-in-chrome"
+tags: ["マーケ", "運輸", "ブランド価値向上"]   # 記事ページのタグに合わせる。空にしない
 ---
 
 # 記事タイトル
@@ -63,7 +69,7 @@ paywall_note: "日経トレンディ電子版有料会員限定のため導入�
 | パス | 役割 |
 | --- | --- |
 | `articles/YYYY-MM-DD/*.md` | 記事の実体（唯一の情報源） |
-| `scripts/build_site.py` | `site/` に静的サイトを生成 |
+| `scripts/build_site.py` | `site/` に静的サイトを生成（トップ＝直近80本＋月別ナビ＋検索、`m/YYYY-MM.html`＝月別、`a/<記事ID>.html`＝記事ごと） |
 | `scripts/check_articles.py` | 必須項目・URL 重複・本文長を検査 |
 | `.github/workflows/deploy.yml` | `main` への push でビルドして Pages へデプロイ |
 
@@ -76,3 +82,11 @@ python3 -m http.server -d site 8000   # http://localhost:8000
 ```
 
 `site/` はビルド生成物なのでコミットしない（`.gitignore` 済み）。
+
+## 記事数の規模について
+
+2026-01-05 以降の 783 本はアーティファクト版保管庫から一括移行したもので、
+移行分は `fetched_via: "artifact-migration"` で識別できる。1 日あたり最大 14 本のペースで増えるため、
+トップページは全件を並べず「直近 80 本＋月別アーカイブ＋検索」の形にしてある。
+検索は `index.json`（全件の索引）を検索欄にフォーカスした時点で初めて取得する遅延読み込みなので、
+記事が数千本になってもトップページ自体は軽いまま保たれる。
