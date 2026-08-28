@@ -36,10 +36,11 @@ jobs:
       - name: サイト生成
         run: python3 scripts/build_site.py
 
+      # Pages の有効化はリポジトリ設定で済ませてある
+      # （Settings > Pages > Source: GitHub Actions）。
+      # GITHUB_TOKEN では Pages サイトを新規作成できないため enablement は使わない。
       - name: Pages の設定
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
